@@ -9,9 +9,7 @@ module Spree
     #
     # However, this will be a breaking change as it will change the behaviour of
     # calling `destroy` on these records.
-    acts_as_paranoid
-    include Discard::Model
-    self.discard_column = :deleted_at
+    include Spree::SoftDeletable
 
     belongs_to :price, class_name: "Spree::Price", touch: true
     belongs_to :price_with_deleted, -> { with_discarded }, class_name: "Spree::Price", foreign_key: :price_id
@@ -27,13 +25,13 @@ module Spree
 
     before_save :compute_calculated_price
 
-    scope :ordered, -> { order(Arel.sql('start_at IS NOT NULL, start_at ASC')) }
-    scope :active, -> { where(enabled: true).where('(start_at <= ? OR start_at IS NULL) AND (end_at >= ? OR end_at IS NULL)', Time.now, Time.now) }
+    scope :ordered, -> { order(Arel.sql("start_at IS NOT NULL, start_at ASC")) }
+    scope :active, -> { where(enabled: true).where("(start_at <= ? OR start_at IS NULL) AND (end_at >= ? OR end_at IS NULL)", Time.now, Time.now) }
 
     # TODO make this work or remove it
-    #def self.calculators
+    # def self.calculators
     #  Rails.application.config.spree.calculators.send(self.to_s.tableize.gsub('/', '_').sub('spree_', ''))
-    #end
+    # end
 
     def self.for_product(product)
       ids = product.variants_including_master
@@ -58,18 +56,18 @@ module Spree
 
     def start(end_time = nil)
       end_time = nil if end_time.present? && end_time <= Time.now # if end_time is not in the future then make it nil (no end)
-      attr = { end_at: end_time, enabled: true }
-      attr[:start_at] = Time.now if self.start_at.present? && self.start_at > Time.now # only set start_at if it's not set in the past
+      attr = {end_at: end_time, enabled: true}
+      attr[:start_at] = Time.now if start_at.present? && start_at > Time.now # only set start_at if it's not set in the past
       update(attr)
     end
 
     def stop
-      update({ end_at: Time.now, enabled: false })
+      update({end_at: Time.now, enabled: false})
     end
 
     # Convenience method for displaying the price of a given sale_price in the table
     def display_price
-      Spree::Money.new(value || 0, { currency: price.currency })
+      Spree::Money.new(value || 0, {currency: price.currency})
     end
 
     def update_calculated_price!
