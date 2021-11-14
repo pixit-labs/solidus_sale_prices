@@ -3,6 +3,19 @@ module SolidusSalePrices
     module ProductDecorator
         def self.prepended(base)
         base.has_many :sale_prices, through: :prices
+        # sort products by master sale price value or default price amount
+        # Scenarios
+        # 1. when there are no sales, we sort by amount column of master variant
+        # 2. when some products have a master sale price but some dont, we create a new column as a result of coalesce function.
+        #    in this new column, for each product, we have either the sale price or the default master price
+        #    we then order this column.
+        # 3. all products have sales but some of them have the same sale price. The tie is solved by compairing their default master price.
+        base.scope :sort_by_master_sale_price_value_or_default_price_amount_asc, -> {
+          with_default_price.left_joins(master: [prices: :sale_prices]).order(Arel.sql("COALESCE(spree_sale_prices.value, spree_prices.amount)").asc, ::Spree::Price.arel_table[:amount].asc)
+        }
+        base.scope :sort_by_master_sale_price_value_or_default_price_amount_desc, -> {
+          with_default_price.left_joins(master: [prices: :sale_prices]).order(Arel.sql("COALESCE(spree_sale_prices.value, spree_prices.amount)").desc, ::Spree::Price.arel_table[:amount].desc)
+        }
       end
 
       # Essentially all read values here are delegated to reading the value on the Master variant
