@@ -24,6 +24,18 @@ describe Spree::SalePrice do
       end
     end
 
+    context 'with discarded active sale prices' do
+      let!(:price) { create(:international_price) }
+      let!(:disabled) { create(:sale_price, price: price, enabled: false) }
+      let!(:oldest_active)  { create(:active_sale_price, price: price) }
+      let!(:newest_active)  { create(:active_sale_price, price: price) }
+
+      it  "ignores discarded sale prices"  do
+        newest_active.discard
+        is_expected.to contain_exactly(oldest_active)
+      end
+    end
+
     context 'with multiple prices for different variants' do
       let!(:price) { create(:international_price) }
       let!(:disabled) { create(:sale_price, price: price, enabled: false) }

@@ -42,7 +42,8 @@ module Spree
       enabled_condition = sales[:enabled].eq('true')
       start_at_condition = sales[:start_at].lteq(Time.now).or(sales[:start_at].eq(nil))
       end_at_condition = sales[:end_at].gteq(Time.now).or(sales[:end_at].eq(nil))
-      active_sales_condition= enabled_condition.and(start_at_condition.and(end_at_condition))
+      not_discarded_condition = sales[:deleted_at].eq(nil)
+      active_sales_condition= enabled_condition.and(start_at_condition.and(end_at_condition)).and(not_discarded_condition)
 
       # we need to group by price id and created at desc but only for active sales
       # then we keep the first one of each group
