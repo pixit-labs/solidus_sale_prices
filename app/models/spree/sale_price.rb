@@ -33,6 +33,31 @@ module Spree
     #  Rails.application.config.spree.calculators.send(self.to_s.tableize.gsub('/', '_').sub('spree_', ''))
     # end
 
+    scope :currently_active_sale_per_price, -> {
+      sales = self.arel_table
+
+      source = sales.project(Arel.star)
+
+      # cannot work using active scope so we used arel to construct the active scope condition
+      enabled_condition = sales[:enabled].eq('true')
+      start_at_condition = sales[:start_at].lteq(Time.now).or(sales[:start_at].eq(nil))
+      end_at_condition = sales[:end_at].gteq(Time.now).or(sales[:end_at].eq(nil))
+      active_sales_condition= enabled_condition.and(start_at_condition.and(end_at_condition))
+
+      # we need to group by price id and created at desc but only for active sales
+      # then we keep the first one of each group
+      subquery = source
+        .distinct_on(sales[:price_id]).order(sales[:price_id], sales[:created_at].desc)
+        .where(active_sales_condition)
+
+      # Creates alias
+      lates_prices_table = Arel::Nodes::TableAlias.new(
+        Arel.sql(format('(%s)', subquery.to_sql)), self.arel_table.name
+      )
+
+      self.from(lates_prices_table)
+    }
+
     def self.for_product(product)
       ids = product.variants_including_master
       ordered.where(price_id: Spree::Price.where(variant_id: ids))

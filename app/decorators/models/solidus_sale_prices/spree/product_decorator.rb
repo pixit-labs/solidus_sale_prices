@@ -1,8 +1,9 @@
 module SolidusSalePrices
   module Spree
     module ProductDecorator
-        def self.prepended(base)
+      def self.prepended(base)
         base.has_many :sale_prices, through: :prices
+
         # sort products by master sale price value or default price amount
         # Scenarios
         # 1. when there are no sales, we sort by amount column of master variant
@@ -10,11 +11,31 @@ module SolidusSalePrices
         #    in this new column, for each product, we have either the sale price or the default master price
         #    we then order this column.
         # 3. all products have sales but some of them have the same sale price. The tie is solved by compairing their default master price.
+
+
+        # We want to sort products by the master variant's active sale price value or price amount, if there is no sale price.
+        # We want to take into consideration default pricing options (i.e currency)
+        # 1. We join with the master variants(first left outer join)
+        # 2. We then join master variants with the custom "spree.prices sorted by active sale or master price"
+        # 3. then we apply some conditions about
         base.scope :sort_by_master_sale_price_value_or_default_price_amount_asc, -> {
-          with_default_price.left_joins(master: [prices: :sale_prices]).order(Arel.sql("COALESCE(spree_sale_prices.value, spree_prices.amount)").asc, ::Spree::Price.arel_table[:amount].asc)
+          with_default_price
+            .joins(
+              <<~SQL
+                LEFT OUTER JOIN (#{::Spree::SalePrice::currently_active_sale_per_price.to_sql}) as spree_sale_prices ON spree_sale_prices.price_id = spree_prices.id
+               SQL
+            )
+            .order(Arel.sql("COALESCE(spree_sale_prices.value, spree_prices.amount)").asc, ::Spree::Price.arel_table[:amount].asc)
         }
+
         base.scope :sort_by_master_sale_price_value_or_default_price_amount_desc, -> {
-          with_default_price.left_joins(master: [prices: :sale_prices]).order(Arel.sql("COALESCE(spree_sale_prices.value, spree_prices.amount)").desc, ::Spree::Price.arel_table[:amount].desc)
+          with_default_price
+            .joins(
+              <<~SQL
+                LEFT OUTER JOIN (#{::Spree::SalePrice::currently_active_sale_per_price.to_sql}) as spree_sale_prices ON spree_sale_prices.price_id = spree_prices.id
+               SQL
+            )
+            .order(Arel.sql("COALESCE(spree_sale_prices.value, spree_prices.amount)").desc, ::Spree::Price.arel_table[:amount].desc)
         }
       end
 

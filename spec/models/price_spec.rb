@@ -1,142 +1,155 @@
 require 'spec_helper'
 
-describe Spree::Price do
-  let(:price) { create(:price, amount: price_amount) }
-  let(:price_amount) { 19.99 }
+describe Spree::SalePrice do
+  describe '#start' do
+    let(:sale_price) { build(:sale_price) }
 
-  describe '#new_sale' do
-    subject { price.new_sale(sale_price_value) }
+    context 'when it starts without an end time' do
+      before { sale_price.start }
 
-    let(:sale_price_value) { 15.99 }
-
-    it 'builds a new sale' do
-      is_expected.to have_attributes({
-        value: BigDecimal(sale_price_value, 4),
-        start_at: be_within(1.second).of(Time.now),
-        end_at: nil,
-        enabled: true,
-        calculator: an_instance_of(Spree::Calculator::FixedAmountSalePriceCalculator)
-      })
-    end
-  end
-
-  describe '#put_on_sale' do
-    subject(:put_on_sale) { price.put_on_sale sale_price_value, options }
-
-    context 'when the sale price calculator is not passed as argument' do
-      let(:sale_price_value) { 15.95 }
-      let(:options) { {} }
-
-      it 'puts the price on sale' do
-        expect { put_on_sale }.to change { price.reload.on_sale? }.from(false).to(true)
+      it 'enables the sale price' do
+        expect(sale_price).to be_enabled
       end
 
-      it "updates the price's price" do
-        expect { put_on_sale }.to change { price.reload.price }.from(price_amount).to(BigDecimal(sale_price_value, 4))
-      end
-
-      it "sets original_price" do
-        put_on_sale
-
-        expect(price.original_price).to eq price_amount
+      it 'unsets the end time' do
+        expect(sale_price.end_at).to be_nil
       end
     end
 
-    context 'when the sale price calculator passed as argument is percent off' do
-      let(:sale_price_value) { 0.2 }
-      let(:options) { { calculator_type: Spree::Calculator::PercentOffSalePriceCalculator.new } }
+    context 'when it starts with an end time' do
+      before { sale_price.start(1.day.from_now) }
 
-      it 'puts the price on sale' do
-        expect { put_on_sale }.to change { price.reload.on_sale? }.from(false).to(true)
+      it 'enables the sale price' do
+        expect(sale_price).to be_enabled
       end
 
-      it "updates the price's price" do
-        expect { put_on_sale }.to change { price.reload.price }.from(price_amount).to(be_within(0.01).of(15.99))
-      end
-
-      it "sets original_price" do
-        put_on_sale
-
-        expect(price.original_price).to eq price_amount
+      it 'sets the end time' do
+        expect(sale_price.end_at).to be_within(1.second).of(1.day.from_now)
       end
     end
   end
 
-  describe '#discount_percent' do
-    subject { price.discount_percent.to_f }
+  describe '#stop' do
+    let(:sale_price) { build(:active_sale_price) }
 
-    context 'when there is no original price' do
-      before { price.amount = BigDecimal(0) }
+    before { sale_price.stop }
 
-      it { is_expected.to be_zero }
+    it 'disables the sale price' do
+      expect(sale_price).not_to be_enabled
     end
 
-    context 'when it is not on sale' do
-      it { is_expected.to be_zero }
+    it 'sets the end time' do
+      expect(sale_price.end_at).to be_within(2.second).of(Time.now)
+    end
+  end
+
+  describe '#display_price' do
+    let(:sale_price) { create(:active_sale_price) }
+    subject(:display_price) { sale_price.display_price }
+
+    it 'is expected to be an instance of Spree::Money' do
+      expect(display_price).to be_a Spree::Money
     end
 
-    context 'when it is on sale' do
-      before { price.put_on_sale(15.00) }
+    it 'is expected to be similar to the calculated price' do
+      expect(display_price.money.amount.to_f).to be_within(0.1).of(sale_price.calculated_price.to_f)
+    end
 
-      it 'returns correct percentage value' do
-        is_expected.to be_within(0.1).of(25)
+    it 'is expected to have the same currency of sale price' do
+      expect(display_price.money.currency).to eq(sale_price.currency)
+    end
+  end
+
+  describe '#price_with_deleted' do
+    context 'when the associated price is destroyed' do
+      let(:sale_price) { create(:sale_price) }
+      let(:price) { sale_price.price }
+
+      before do
+        price.discard
+        sale_price.reload
+      end
+
+      it 'still can find the price via price_with_deleted association' do
+        expect(sale_price.price).to be_nil
+        expect(sale_price.price_with_deleted).to eql price
       end
     end
   end
 
-  describe '#destroy' do
-    context 'when there are sale prices associated to the price' do
-      before { price.put_on_sale 10 }
+  describe '#variant association' do
+    context 'when the price has been soft-deleted' do
+      before do
+        sale = create :sale_price
+        sale.price.discard
+      end
 
-      it 'destroys all sale prices when it is destroyed' do
-        expect { price.discard }
-          .to change { Spree::SalePrice.all.size }
-          .from(1).to(0)
+      it 'preloads the variant via SQL also for soft-deleted records' do
+        records = Spree::SalePrice.with_discarded.includes(:variant)
+        expect(records.first.variant).to be_present
       end
     end
   end
 
-  describe 'on_sale?' do
-    subject { price.on_sale? }
+  context 'touching associated product when destroyed' do
+    subject { -> { sale_price.reload.discard } }
+    let!(:product) { sale_price.product }
+    let(:sale_price) { Timecop.travel(1.day.ago) { create(:sale_price) } }
 
-    context 'when there are no active sales' do
-      it { is_expected.to be_falsey }
+    it { is_expected.to change { product.reload.updated_at } }
+
+    context 'when product association has been destroyed' do
+      before { sale_price.variant.update_columns(product_id: nil) }
+
+      it 'does not touch product' do
+        expect(subject).not_to change { product.reload.updated_at }
+      end
     end
 
-    context 'when there is one active sale but its calculated price is equal to the original price' do
-      before { price.put_on_sale price_amount }
+    context 'when associated variant has been destroyed' do
+      before { sale_price.variant.discard }
 
-      it { is_expected.to be_falsey }
+      it 'does not touch product' do
+        expect(subject).not_to change { product.reload.updated_at }
+      end
     end
 
-    context 'when there is one active sale and its calculated price is less than the original price' \
-            'but its value is greater than the original price' do
-      let(:price_amount) { 0.09 }
+    context 'when associated price has been destroyed' do
+      before { sale_price.price.discard }
 
-      before { price.put_on_sale 0.1, calculator_type: Spree::Calculator::PercentOffSalePriceCalculator.new }
-
-      it { is_expected.to be_truthy }
-    end
-
-    context 'when there is one active sale and its calculated price is less than the original price' do
-      before { price.put_on_sale price_amount - 0.01 }
-
-      it { is_expected.to be_truthy }
+      it 'does not touch product' do
+        expect(subject).not_to change { product.reload.updated_at }
+      end
     end
   end
 
-  describe '#recalculate_sale_prices' do
-    before do
-      price.put_on_sale 0.1, calculator_type: Spree::Calculator::PercentOffSalePriceCalculator.new
-      price.put_on_sale 0.2, calculator_type: Spree::Calculator::PercentOffSalePriceCalculator.new
+  describe '.ordered' do
+    subject { described_class.ordered }
+
+    let!(:forever) { create(:sale_price) }
+    let!(:future) { create(:sale_price, start_at: 10.days.from_now) }
+    let!(:past) { create(:sale_price, start_at: 10.days.ago) }
+    let!(:present) { create(:active_sale_price) }
+
+    it { is_expected.to match [forever, past, present, future] }
+  end
+
+  describe '.for_product' do
+    subject { described_class.for_product(product) }
+
+    before { product.put_on_sale(10.95) }
+
+    context 'without variants' do
+      let(:product) { create(:product) }
+
+      it { is_expected.to match product.master.sale_prices }
     end
 
-    context 'when the price amount changes' do
-      before { price.update! amount: 100 }
+    context 'with variants' do
+      let(:variant) { create(:variant) }
+      let(:product) { variant.product }
 
-      it 'updates calculated sale prices' do
-        expect(price.sale_prices.pluck(:calculated_price)).to contain_exactly 90, 80
-      end
+      it { is_expected.to match_array(variant.sale_prices + product.master.sale_prices) }
     end
   end
 end
