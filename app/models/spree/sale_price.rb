@@ -9,7 +9,15 @@ module Spree
     #
     # However, this will be a breaking change as it will change the behaviour of
     # calling `destroy` on these records.
-    include Spree::SoftDeletable
+    if defined?(Spree::SoftDeletable)
+      include Spree::SoftDeletable
+    else
+      acts_as_paranoid
+      include Spree::ParanoiaDeprecations
+
+      include Discard::Model
+      self.discard_column = :deleted_at
+    end
 
     belongs_to :price, class_name: "Spree::Price", touch: true
     belongs_to :price_with_deleted, -> { with_discarded }, class_name: "Spree::Price", foreign_key: :price_id
