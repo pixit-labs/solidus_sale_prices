@@ -12,28 +12,27 @@ module SolidusSalePrices
         #    we then order this column.
         # 3. all products have sales but some of them have the same sale price. The tie is solved by compairing their default master price.
 
-
         # We want to sort products by the master variant's active sale price value or price amount, if there is no sale price.
         # We want to take into consideration default pricing options (i.e currency)
         # 1. We join with the master variants(first left outer join)
         # 2. We then join master variants with the custom "spree.prices sorted by active sale or master price"
         # 3. then we apply some conditions about
         base.scope :sort_by_master_sale_price_value_or_default_price_amount_asc, -> {
-          with_default_price
+          joins(master: :prices)
             .joins(
               <<~SQL
-                LEFT OUTER JOIN (#{::Spree::SalePrice::currently_active_sale_per_price.to_sql}) as spree_sale_prices ON spree_sale_prices.price_id = spree_prices.id
-               SQL
+                LEFT OUTER JOIN (#{::Spree::SalePrice.currently_active_sale_per_price.to_sql}) as spree_sale_prices ON spree_sale_prices.price_id = spree_prices.id
+              SQL
             )
             .order(Arel.sql("COALESCE(spree_sale_prices.value, spree_prices.amount)").asc, ::Spree::Price.arel_table[:amount].asc)
         }
 
         base.scope :sort_by_master_sale_price_value_or_default_price_amount_desc, -> {
-          with_default_price
+          joins(master: :prices)
             .joins(
               <<~SQL
-                LEFT OUTER JOIN (#{::Spree::SalePrice::currently_active_sale_per_price.to_sql}) as spree_sale_prices ON spree_sale_prices.price_id = spree_prices.id
-               SQL
+                LEFT OUTER JOIN (#{::Spree::SalePrice.currently_active_sale_per_price.to_sql}) as spree_sale_prices ON spree_sale_prices.price_id = spree_prices.id
+              SQL
             )
             .order(Arel.sql("COALESCE(spree_sale_prices.value, spree_prices.amount)").desc, ::Spree::Price.arel_table[:amount].desc)
         }
@@ -61,32 +60,33 @@ module SolidusSalePrices
       def put_on_sale(value, params = {}, selected_variants = [])
         all_variants = params[:all_variants] || true
         run_on_variants(all_variants, selected_variants) { |v| v.put_on_sale(value, params) }
-        self.touch
+        touch
       end
 
-      alias :create_sale :put_on_sale
+      alias_method :create_sale, :put_on_sale
 
       def enable_sale(all_variants = true)
         run_on_variants(all_variants) { |v| v.enable_sale }
-        self.touch
+        touch
       end
 
       def disable_sale(all_variants = true)
         run_on_variants(all_variants) { |v| v.disable_sale }
-        self.touch
+        touch
       end
 
       def start_sale(end_time = nil, all_variants = true)
         run_on_variants(all_variants) { |v| v.start_sale(end_time) }
-        self.touch
+        touch
       end
 
       def stop_sale(all_variants = true)
         run_on_variants(all_variants) { |v| v.stop_sale }
-        self.touch
+        touch
       end
 
       private
+
       def run_on_variants(all_variants, selected_variants = [], &block)
         if selected_variants.present?
           scope = variants_including_master
